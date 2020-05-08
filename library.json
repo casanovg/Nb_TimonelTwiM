@@ -7,7 +7,7 @@
         "url": "https://github.com/casanovg/Nb_TimonelTwiM.git"
     },
     "include": "src",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "frameworks": "arduino",
     "dependencies": {
         "name": "NbMicro"

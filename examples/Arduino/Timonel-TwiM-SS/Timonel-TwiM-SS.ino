@@ -22,8 +22,6 @@
 #define SCL 2 /* I2C SCL pin */
 
 // Prototypes
-//void setup(void);
-//void loop(void);
 bool CheckApplUpdate(void);
 void ListTwiDevices(byte sda = 0, byte scl = 0);
 void PrintStatus(Timonel tml);
