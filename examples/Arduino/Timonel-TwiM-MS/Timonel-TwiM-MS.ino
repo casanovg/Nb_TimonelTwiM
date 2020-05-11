@@ -1,5 +1,5 @@
 /*
-  Timonel-TwiM-MS.cpp
+  Timonel-TwiM-MS.ino
   ===================
   Timonel libraries test program (Multi Slave) v1.4
   ----------------------------------------------------------------------------

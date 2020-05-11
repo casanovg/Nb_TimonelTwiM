@@ -1,5 +1,5 @@
 /*
-  Timonel-TwiM-SS.cpp
+  Timonel-TwiM-SS.ino
   ===================
   Timonel libraries test program (Single Slave) v1.4
   ----------------------------------------------------------------------------
