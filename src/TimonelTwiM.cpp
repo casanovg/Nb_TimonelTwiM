@@ -4,7 +4,7 @@
  *  ...........................................
  *  File: TimonelTwiM.cpp (Library)
  *  ........................................... 
- *  Version: 1.0.1 / 2020-05-07
+ *  Version: 1.1.0 / 2020-05-07
  *  gustavo.casanova@gmail.com
  *  ...........................................
  *  This library enables uploading firmware to a microcontroller
@@ -17,7 +17,7 @@
 #include <Arduino.h>
 
 // Class constructor
-Timonel::Timonel(const byte twi_address, const byte sda, const byte scl) : NbMicro(twi_address, sda, scl) {
+Timonel::Timonel(const uint8_t twi_address, const uint8_t sda, const uint8_t scl) : NbMicro(twi_address, sda, scl) {
     if ((addr_ >= LOW_TML_ADDR) && (addr_ <= HIG_TML_ADDR)) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
         USE_SERIAL.printf_P("[%s] Bootloader instance created with TWI address %02d.\r\n", __func__, addr_);
@@ -44,7 +44,7 @@ Timonel::~Timonel() {
 Timonel::Status Timonel::GetStatus(void) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     USE_SERIAL.printf_P("[%s] Getting Timonel device %02d status ...\r\n", __func__, addr_);
-    byte twi_errors = QueryStatus();
+    uint8_t twi_errors = QueryStatus();
     if (twi_errors > 0) {
         USE_SERIAL.printf_P("[%s] Error getting Timonel %02d status <<< %d \r\n", __func__, addr_, twi_errors);
     }
@@ -60,11 +60,11 @@ Timonel::Status Timonel::GetStatus(void) {
   |_________________________|
 */
 // Set this object's TWI address (allowed only once, if it wasn't set at object creation time)
-byte Timonel::SetTwiAddress(byte twi_address) {
+uint8_t Timonel::SetTwiAddress(uint8_t twi_address) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     USE_SERIAL.printf_P("[%s] Set Timonel object TWI address to -> %02d ...\r\n", __func__, twi_address);
 #endif /* DEBUG_LEVEL */
-    byte twi_errors = 0;
+    uint8_t twi_errors = 0;
     twi_errors += NbMicro::SetTwiAddress(twi_address);
     twi_errors += BootloaderInit();
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
@@ -82,11 +82,13 @@ byte Timonel::SetTwiAddress(byte twi_address) {
   |_________________________|
 */
 // Ask Timonel to stop executing and run the user application
-byte Timonel::RunApplication(void) {
+uint8_t Timonel::RunApplication(void) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     USE_SERIAL.printf_P("\n\r[%s] Exit bootloader & run application >>> 0x%02X\r\n", __func__, EXITTMNL);
 #endif /* DEBUG_LEVEL */
-    return (TwiCmdXmit(EXITTMNL, ACKEXITT));
+    uint8_t twi_errors = TwiCmdXmit(EXITTMNL, ACKEXITT);
+    twi_errors += TwiCmdXmit(GETTMNLV, ACKTMNLV);  // This is necessary to force Timonel to exit and run the user application
+    return twi_errors;
 }
 
 /* _________________________
@@ -95,11 +97,11 @@ byte Timonel::RunApplication(void) {
   |_________________________|
 */
 // Ask Timonel to delete the user application
-byte Timonel::DeleteApplication(void) {
+uint8_t Timonel::DeleteApplication(void) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     USE_SERIAL.printf_P("\n\r[%s] Delete Flash Memory >>> 0x%02X\r\n", __func__, DELFLASH);
 #endif /* DEBUG_LEVEL */
-    byte twi_errors = TwiCmdXmit(DELFLASH, ACKDELFL);
+    uint8_t twi_errors = TwiCmdXmit(DELFLASH, ACKDELFL);
     delay(DLY_DEL_INIT); /* Long delay (~750 ms) to allow complete erasing before trying to initialize */
     twi_errors += BootloaderInit();
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
@@ -120,16 +122,16 @@ byte Timonel::DeleteApplication(void) {
   |_________________________|
 */
 // Upload a user application to a microcontroller running Timonel
-byte Timonel::UploadApplication(byte payload[], int payload_size, const int start_address) {
+uint8_t Timonel::UploadApplication(uint8_t payload[], uint16_t payload_size, const uint16_t start_address) {
     // .....................................
     // ...... Function initialization ......
     // .....................................
-    byte packet_ix = 0;                         /* TWI (I2C) data packet internal byte index */
-    byte padding = 0;                           /* Padding byte quantity to add to match the page size */
-    byte page_end = 0;                          /* Byte counter to detect the end of flash mem page */
-    byte page_count = 1;                        /* Current page counter */
-    byte twi_errors = 0;                        /* Upload error counter */
-    byte data_packet[MST_PACKET_SIZE] = {0xFF}; /* Payload data packet to be sent to Timonel */
+    uint8_t packet_ix = 0;                         /* TWI (I2C) data packet internal byte index */
+    uint8_t padding = 0;                           /* Padding byte quantity to add to match the page size */
+    uint8_t page_end = 0;                          /* Byte counter to detect the end of flash mem page */
+    uint8_t page_count = 1;                        /* Current page counter */
+    uint8_t twi_errors = 0;                        /* Upload error counter */
+    uint8_t data_packet[MST_PACKET_SIZE] = {0xFF}; /* Payload data packet to be sent to Timonel */
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     USE_SERIAL.printf_P("\n\r");
 #endif /* DEBUG_LEVEL */
@@ -254,7 +256,7 @@ byte Timonel::UploadApplication(byte payload[], int payload_size, const int star
     // .....................................
     // ...... Application upload loop ......
     // .....................................
-    for (int i = 0; i < payload_size; i++) {
+    for (uint16_t i = 0; i < payload_size; i++) {
         if (i < (payload_size - padding)) {
             // If there are payload unsent data, place them in a data packet
             data_packet[packet_ix] = payload[i];
@@ -336,66 +338,139 @@ byte Timonel::UploadApplication(byte payload[], int payload_size, const int star
 // Display the microcontroller's entire flash memory contents over a serial connection
 #if ((defined FEATURES_CODE) && ((FEATURES_CODE >> F_CMD_READFLASH) & true))
 //#pragma GCC warning "Timonel::DumpMemory function code included in TWI master!"
-byte Timonel::DumpMemory(const word flash_size, const byte rx_packet_size, const byte values_per_line) {
+uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_size, const uint8_t values_per_line) {
     if (!((status_.features_code >> F_CMD_READFLASH) & true)) {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
         USE_SERIAL.printf_P("\n\r[%s] Function not supported by current Timonel (TWI %d) features ...\r\n", __func__, addr_);
+#else   // -----
+        USE_SERIAL.print("");
+        USE_SERIAL.print(__func__);
+        USE_SERIAL.print(" Function not supported by current Timonel features: TWI ");
+        USE_SERIAL.println(addr_);
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
         return ERR_NOT_SUPP;
     }
-    const byte cmd_size = D_CMD_LENGTH;
-    byte twi_cmd_arr[cmd_size] = {READFLSH, 0, 0, 0};
-    byte twi_reply_arr[rx_packet_size + D_REPLY_OVRHD];
-    byte checksum_errors = 0;
-    byte line_ix = 1;
+    const uint8_t cmd_size = D_CMD_LENGTH;
+    uint8_t twi_cmd_arr[cmd_size] = {READFLSH, 0, 0, 0};
+    uint8_t twi_reply_arr[rx_packet_size + D_REPLY_OVRHD];
+    uint8_t checksum_errors = 0;
+    uint8_t line_ix = 1;
     twi_cmd_arr[3] = rx_packet_size; /* Requested packet size */
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
     USE_SERIAL.printf_P("\n\r[%s] Dumping Timonel (TWI %d) flash memory ...\n\n\r", __func__, addr_);
     USE_SERIAL.printf_P("Addr %04X: ", 0);
-    for (word address = 0; address < flash_size; address += rx_packet_size) {
+#else   // -----
+    USE_SERIAL.println("");
+    USE_SERIAL.print(__func__);
+    USE_SERIAL.print(" Function not supported by current Timonel features: TWI ");
+    USE_SERIAL.println(addr_);
+    USE_SERIAL.print("Addr 0: ");
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
+    for (uint16_t address = 0; address < flash_size; address += rx_packet_size) {
         twi_cmd_arr[1] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
         twi_cmd_arr[2] = (address & 0xFF);          /* Flash page address low byte */
-        byte twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDFSH, twi_reply_arr, rx_packet_size + D_REPLY_OVRHD);
+        uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDFSH, twi_reply_arr, rx_packet_size + D_REPLY_OVRHD);
         if (twi_errors == 0) {
-            byte expected_checksum = 0;
-            for (byte i = 1; i < (rx_packet_size + 1); i++) {
+            uint8_t expected_checksum = 0;
+            for (uint8_t i = 1; i < (rx_packet_size + 1); i++) {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                 USE_SERIAL.printf_P("%02X", twi_reply_arr[i]); /* Memory values */
+#else                                                          // -----
+                USE_SERIAL.print(twi_reply_arr[i], HEX); /* Memory values */
+#endif                                                         // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                 if (line_ix == values_per_line) {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                     USE_SERIAL.printf_P("\n\r");
+#else   // -----
+                    USE_SERIAL.println("");
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                     if ((address + rx_packet_size) < flash_size) {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                         USE_SERIAL.printf_P("Addr %04X: ", address + rx_packet_size); /* Page address */
+#else                                                                                 // -----
+                        USE_SERIAL.print("Addr ");
+                        USE_SERIAL.print(address + rx_packet_size, HEX); /* Page address */
+                        USE_SERIAL.print(": ");
+#endif                                                                                // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                     }
                     line_ix = 0;
                 } else {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                     USE_SERIAL.printf_P(" "); /* Space between values */
+#else                                         // -----
+                    USE_SERIAL.print(" "); /* Space between values */
+#endif                                        // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                 }
                 line_ix++;
-                expected_checksum += (byte)twi_reply_arr[i];
+                expected_checksum += (uint8_t)twi_reply_arr[i];
             }
-            expected_checksum += (byte)twi_cmd_arr[1];
-            expected_checksum += (byte)twi_cmd_arr[2];
-            byte received_checksum = twi_reply_arr[rx_packet_size + 1];
+            expected_checksum += (uint8_t)twi_cmd_arr[1];
+            expected_checksum += (uint8_t)twi_cmd_arr[2];
+            uint8_t received_checksum = twi_reply_arr[rx_packet_size + 1];
             if (expected_checksum != received_checksum) {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                 USE_SERIAL.printf_P("\n\r   ### Checksum ERROR! ###   Expected:%d - Received:%d\n\r", expected_checksum, received_checksum);
+#else   // -----
+                USE_SERIAL.print("\n\r   ### Checksum ERROR! ###   Expected:");
+                USE_SERIAL.print(expected_checksum);
+                USE_SERIAL.print(" - Received:");
+                USE_SERIAL.println(received_checksum);
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
                 USE_SERIAL.printf_P("%d\n\r", expected_checksum + 1);
                 USE_SERIAL.printf_P(" <-- calculated, received --> %d\n\r", twi_reply_arr[rx_packet_size + 1]);
 #endif /* DEBUG_LEVEL */
                 if (checksum_errors++ == MAXCKSUMERRORS) {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                     USE_SERIAL.printf_P("[%s] Too many Checksum ERRORS [ %d ], stopping! \n\r", __func__, checksum_errors);
+#else   // -----
+                    USE_SERIAL.println("");
+                    USE_SERIAL.print(__func__);
+                    USE_SERIAL.print(" Too many Checksum ERRORS [ ");
+                    USE_SERIAL.print(checksum_errors);
+                    USE_SERIAL.println(" ], stopping!");
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                     delay(DLY_1_SECOND);
                     return ERR_CHECKSUM_D;
                 }
             }
         } else {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
             USE_SERIAL.printf_P("[%s] Error parsing 0x%02X command <<< 0x%02X\n\r", __func__, twi_cmd_arr[0], twi_reply_arr[0]);
+#else   // -----
+            USE_SERIAL.print(__func__);
+            USE_SERIAL.print(" Error parsing command [ ");
+            USE_SERIAL.print(twi_cmd_arr[0]);
+            USE_SERIAL.print(" ] <<< ");
+            USE_SERIAL.println(twi_reply_arr[0]);
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
             return ERR_CMD_PARSE_D;
         }
         delay(DLY_PKT_REQUEST);
     }
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
     USE_SERIAL.printf_P("\n\r[%s] Timonel (TWI %d) flash memory dump successful!", __func__, addr_);
+#else   // -----
+    USE_SERIAL.println("");
+    USE_SERIAL.print(__func__);
+    USE_SERIAL.print(" Timonel (TWI ");
+    USE_SERIAL.print(addr_);
+    USE_SERIAL.println(") flash memory dump successful!");
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     if (checksum_errors > 0) {
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
         USE_SERIAL.printf_P(" Checksum errors: %d", checksum_errors);
+#else   // -----
+        USE_SERIAL.print(" Checksum errors: ");
+        USE_SERIAL.println(checksum_errors);
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     }
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
     USE_SERIAL.printf_P("\n\n\r");
-    return OK;
+#else
+    USE_SERIAL.println("\n\r");
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
+    return 0;
 }
 #else
 #pragma GCC warning "Timonel::DumpMemory function code NOT INCLUDED in TWI master!"
@@ -406,8 +481,8 @@ byte Timonel::DumpMemory(const word flash_size, const byte rx_packet_size, const
 /////////////////////////////////////////////////////////////////////////////
 
 // Function BootloaderInit (Initializes Timonel in 1 or 2 steps, as required by its features)
-byte Timonel::BootloaderInit(void) {
-    byte twi_errors = 0;
+uint8_t Timonel::BootloaderInit(void) {
+    uint8_t twi_errors = 0;
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     USE_SERIAL.printf_P("[%s] Timonel device %02d * Initialization Step 1 required by features *\r\n", __func__, addr_);
 #endif /* DEBUG_LEVEL */
@@ -430,12 +505,12 @@ byte Timonel::BootloaderInit(void) {
 }
 
 // Function QueryStatus (Retrieves the bootloader running parameters from the microcontroller)
-byte Timonel::QueryStatus(void) {
+uint8_t Timonel::QueryStatus(void) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     USE_SERIAL.printf_P("[%s] Querying Timonel device %02d to get status ...\r\n", __func__, addr_);
-#endif                                        /* DEBUG_LEVEL */
-    byte twi_reply_arr[S_REPLY_LENGTH] = {0}; /* Status received from I2C slave */
-    byte twi_errors = TwiCmdXmit(GETTMNLV, ACKTMNLV, twi_reply_arr, S_REPLY_LENGTH);
+#endif                                           /* DEBUG_LEVEL */
+    uint8_t twi_reply_arr[S_REPLY_LENGTH] = {0}; /* Status received from I2C slave */
+    uint8_t twi_errors = TwiCmdXmit(GETTMNLV, ACKTMNLV, twi_reply_arr, S_REPLY_LENGTH);
     if (twi_errors != 0) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
         USE_SERIAL.printf_P("[%s] Error querying Timonel device %02d to get status (%d) ...\r\n", __func__, addr_, twi_errors);
@@ -456,24 +531,24 @@ byte Timonel::QueryStatus(void) {
             status_.low_fuse_setting = twi_reply_arr[S_LOW_FUSE];
             status_.oscillator_cal = twi_reply_arr[S_OSCCAL];
         }
-        return OK;
+        return 0;
     }
 }
 
 // Function SendDataPacket (Sends a data packet, a memory page fraction, to Timonel)
-byte Timonel::SendDataPacket(const byte data_packet[]) {
-    const byte cmd_size = MST_PACKET_SIZE + 2;
-    const byte reply_size = 2;
-    byte twi_cmd[cmd_size] = {0};
-    byte twi_reply_arr[reply_size] = {0};
-    byte checksum = 0;
+uint8_t Timonel::SendDataPacket(const uint8_t data_packet[]) {
+    const uint8_t cmd_size = MST_PACKET_SIZE + 2;
+    const uint8_t reply_size = 2;
+    uint8_t twi_cmd[cmd_size] = {0};
+    uint8_t twi_reply_arr[reply_size] = {0};
+    uint8_t checksum = 0;
     twi_cmd[0] = WRITPAGE;
     for (int i = 1; i < cmd_size - 1; i++) {
         twi_cmd[i] = data_packet[i - 1];
-        checksum += (byte)data_packet[i - 1]; /* Data checksum accumulator (mod 256) */
+        checksum += (uint8_t)data_packet[i - 1]; /* Data checksum accumulator (mod 256) */
     }
     twi_cmd[cmd_size - 1] = checksum;
-    byte twi_errors = TwiCmdXmit(twi_cmd, cmd_size, ACKWTPAG, twi_reply_arr, reply_size);
+    uint8_t twi_errors = TwiCmdXmit(twi_cmd, cmd_size, ACKWTPAG, twi_reply_arr, reply_size);
     if (twi_reply_arr[0] == ACKWTPAG) {
         if (twi_reply_arr[1] != checksum) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
@@ -498,20 +573,20 @@ byte Timonel::SendDataPacket(const byte data_packet[]) {
 // Function SetPageAddres (Sets the start address of a flash memory page)
 #if (!((defined FEATURES_CODE) && ((FEATURES_CODE >> F_AUTO_PAGE_ADDR) & true)))
 //#pragma GCC warning "Timonel::SetPageAddress, FillSpecialPage and CalculateTrampoline functions code included in TWI master!"
-byte Timonel::SetPageAddress(const word page_addr) {
-    const byte cmd_size = 4;
-    const byte reply_size = 2;
-    byte twi_cmd_arr[cmd_size] = {STPGADDR, 0, 0, 0};
-    byte twi_reply_arr[reply_size];
-    twi_cmd_arr[1] = ((page_addr & 0xFF00) >> 8);             /* Flash page address MSB */
-    twi_cmd_arr[2] = (page_addr & 0xFF);                      /* Flash page address LSB */
-    twi_cmd_arr[3] = (byte)(twi_cmd_arr[1] + twi_cmd_arr[2]); /* Checksum */
+uint8_t Timonel::SetPageAddress(const uint16_t page_addr) {
+    const uint8_t cmd_size = 4;
+    const uint8_t reply_size = 2;
+    uint8_t twi_cmd_arr[cmd_size] = {STPGADDR, 0, 0, 0};
+    uint8_t twi_reply_arr[reply_size];
+    twi_cmd_arr[1] = ((page_addr & 0xFF00) >> 8);                /* Flash page address MSB */
+    twi_cmd_arr[2] = (page_addr & 0xFF);                         /* Flash page address LSB */
+    twi_cmd_arr[3] = (uint8_t)(twi_cmd_arr[1] + twi_cmd_arr[2]); /* Checksum */
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL == 1))
     USE_SERIAL.printf_P(" (a:%02X%02X) ", twi_cmd_arr[1], twi_cmd_arr[2]);
 #elif ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
     USE_SERIAL.printf_P("\n\n\r[%s] >> Setting flash page address on Timonel >>> %d (STPGADDR)\n\r", __func__, twi_cmd_arr[0]);
 #endif /* DEBUG_LEVEL */
-    byte twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, AKPGADDR, twi_reply_arr, reply_size);
+    uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, AKPGADDR, twi_reply_arr, reply_size);
     if (twi_errors == 0) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
         USE_SERIAL.printf_P("[%s] >> Command %d parsed OK <<< %d\n\r", __func__, twi_cmd_arr[0], twi_reply_arr[0]);
@@ -537,12 +612,12 @@ byte Timonel::SetPageAddress(const word page_addr) {
 }
 
 // Function FillSpecialPage (Fills a reset or trampoline page, as required by Timonel features)
-byte Timonel::FillSpecialPage(const byte page_type, const byte app_reset_msb, const byte app_reset_lsb) {
-    word address = 0x0000;
-    byte packet_ix = 0; /* TWI (I2C) data packet internal byte index */
-    byte twi_errors = 0;
-    byte data_packet[MST_PACKET_SIZE] = {0xFF};
-    byte special_page[64] = {
+uint8_t Timonel::FillSpecialPage(const uint8_t page_type, const uint8_t app_reset_msb, const uint8_t app_reset_lsb) {
+    uint16_t address = 0x0000;
+    uint8_t packet_ix = 0; /* TWI (I2C) data packet internal byte index */
+    uint8_t twi_errors = 0;
+    uint8_t data_packet[MST_PACKET_SIZE] = {0xFF};
+    uint8_t special_page[64] = {
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -566,9 +641,9 @@ byte Timonel::FillSpecialPage(const byte page_type, const byte app_reset_msb, co
             USE_SERIAL.printf_P("[%s] Type %d: Calculate the trampoline and fill the page with 0xFF + 2-byte jump address ...\n\r", __func__, page_type);
 #endif /* DEBUG_LEVEL */
             address = status_.bootloader_start - (SPM_PAGESIZE);
-            word tpl = CalculateTrampoline(status_.bootloader_start, ((app_reset_msb << 8) | app_reset_lsb));
-            special_page[SPM_PAGESIZE - 1] = (byte)((tpl >> 8) & 0xFF);
-            special_page[SPM_PAGESIZE - 2] = (byte)(tpl & 0xFF);
+            uint16_t tpl = CalculateTrampoline(status_.bootloader_start, ((app_reset_msb << 8) | app_reset_lsb));
+            special_page[SPM_PAGESIZE - 1] = (uint8_t)((tpl >> 8) & 0xFF);
+            special_page[SPM_PAGESIZE - 2] = (uint8_t)(tpl & 0xFF);
             break;
         }
         default: {
@@ -578,7 +653,7 @@ byte Timonel::FillSpecialPage(const byte page_type, const byte app_reset_msb, co
     }
     twi_errors += SetPageAddress(address);
     delay(DLY_SET_ADDR);
-    for (byte i = 0; i < SPM_PAGESIZE; i++) {
+    for (uint8_t i = 0; i < SPM_PAGESIZE; i++) {
         data_packet[packet_ix] = special_page[i];
         if (packet_ix++ == (MST_PACKET_SIZE - 1)) {
             for (int j = 0; j < MST_PACKET_SIZE; j++) {
@@ -599,7 +674,7 @@ byte Timonel::FillSpecialPage(const byte page_type, const byte app_reset_msb, co
 }
 
 // Function CalculateTrampoline (Calculates the application trampoline address)
-word Timonel::CalculateTrampoline(word bootloader_start, word application_start) {
+uint16_t Timonel::CalculateTrampoline(uint16_t bootloader_start, uint16_t application_start) {
     return (((~((bootloader_start >> 1) - ((application_start + 1) & 0x0FFF)) + 1) & 0x0FFF) | 0xC000);
 }
 #else

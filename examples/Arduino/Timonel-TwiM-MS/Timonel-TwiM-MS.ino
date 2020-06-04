@@ -1,13 +1,13 @@
 /*
   Timonel-TwiM-MS.ino
   ===================
-  Timonel libraries test program (Multi Slave) v1.4
+  Timonel libraries test program (Multi Slave) v1.5
   ----------------------------------------------------------------------------
   This demo shows how to control and update several Tiny85 microcontrollers
   running the Timonel bootloader from an ESP8266 master.
   It uses a serial console configured at 9600 N 8 1 for feedback.
   ----------------------------------------------------------------------------
-  2019-04-29 Gustavo Casanova
+  2020-06-03 Gustavo Casanova
   ----------------------------------------------------------------------------
 */
 
@@ -26,74 +26,82 @@
 #include <NbMicro.h>
 #include <TimonelTwiM.h>
 #include <TwiBus.h>
+#include <nb-twi-cmd.h>
 
-#include "payload.h"
+#include "payload.h" // This is the application to upload to the ATTiny85 slaves
 
 #define USE_SERIAL Serial
-#define SDA 0 /* I2C SDA pin */
-#define SCL 2 /* I2C SCL pin */
+#define SDA 2  // I2C SDA pin - ESP8266 2 - ESP32 21
+#define SCL 0  // I2C SCL pin - ESP8266 0 - ESP32 22
 #define MAX_TWI_DEVS 28
 #define LOOP_COUNT 3
 #define T_SIGNATURE 84
 
-// Prototypes
-bool CheckApplUpdate(void);
-void PrintStatus(Timonel timonel);
-void ThreeStarDelay(void);
-void ShowHeader(void);
-void ShowMenu(void);
-void PrintLogo(void);
-void ClrScr(void);
-
-// Global Variables
-byte slave_address = 0;
-byte block_rx_size = 0;
+// Global variables
+uint8_t slave_address = 0;
+uint8_t block_rx_size = 0;
 bool app_mode = false;
-byte timonels = 0;
-byte applications = 0;
+uint8_t timonels = 0;
+uint8_t applications = 0;
+void (*resetFunc)(void) = 0;
 
+// Setup block
 void setup() {
     // Initialize the serial port for debugging
     USE_SERIAL.begin(9600);
-    Wire.begin(SDA, SCL);
     ClrScr();
     PrintLogo();
     ShowHeader();
-
-    // Routine loop
-    for (byte loop = 0; loop < LOOP_COUNT; loop++) {
+    /*  ____________________
+       |                    | 
+       |    Routine loop    |
+       |____________________|
+    */    
+    for (uint8_t loop = 0; loop < LOOP_COUNT; loop++) {
         USE_SERIAL.printf_P("\n\rPASS %d OF %d ...\n\r", loop + 1, LOOP_COUNT);
         // The bus device scanning it has to be made as fast as possible since each
         // discovered Timonel has to be initialized before launching the user apps
-        TwiBus twi(SDA, SCL);
+        TwiBus twi_bus(SDA, SCL);
         TwiBus::DeviceInfo dev_info_arr[HIG_TWI_ADDR - LOW_TWI_ADDR + 1];
         // Scanning the TWI bus in search of devices ...
-        byte tml_count = 0;
+        uint8_t tml_count = 0;
         USE_SERIAL.printf_P("\n\r");
         while (tml_count == 0) {
             USE_SERIAL.printf_P("\r\x1b[5mScanning TWI bus ...\x1b[0m");
-            twi.ScanBus(dev_info_arr, HIG_TWI_ADDR - LOW_TWI_ADDR + 1, LOW_TWI_ADDR);
-            byte arr_size = (sizeof(dev_info_arr) / sizeof(dev_info_arr[0]));
-            for (byte i = 0; i < arr_size; i++) {
+            twi_bus.ScanBus(dev_info_arr, HIG_TWI_ADDR - LOW_TWI_ADDR + 1, LOW_TWI_ADDR);
+            uint8_t arr_size = (sizeof(dev_info_arr) / sizeof(dev_info_arr[0]));
+            for (uint8_t i = 0; i < arr_size; i++) {
                 if (dev_info_arr[i].firmware == "Timonel") {
                     tml_count++;
                 }
             }
             if (tml_count > 0) {
                 USE_SERIAL.printf_P("\rTimonel devices found: %d\n\r", tml_count);
+            } else {
+                if (dev_info_arr[0].addr) {
+                    USE_SERIAL.printf_P("\rDevice found at address %d NOT responding, resetting master ...\n\r", dev_info_arr[0].addr);
+                    NbMicro *micro = new NbMicro(dev_info_arr[0].addr, SDA, SCL);
+                    micro->TwiCmdXmit(RESETMCU, ACKRESET);
+                    delete micro;
+                    delay(5000);
+                    ESP.restart();
+                }
             }
             delay(1000);
         }
         Timonel *tml_pool[tml_count];
-        // Create and initialize bootloader objects found
-        for (byte i = 0; i <= (tml_count); i++) {
+        //
+        // **************************************************
+        // * Create and initialize bootloader objects found *
+        // **************************************************
+        for (uint8_t i = 0; i <= (tml_count); i++) {
             if (dev_info_arr[i].firmware == "Timonel") {
-                tml_pool[i] = new Timonel(dev_info_arr[i].addr);
+                tml_pool[i] = new Timonel(dev_info_arr[i].addr, SDA, SCL);
                 USE_SERIAL.printf_P("\n\rGetting status of Timonel device %d\n\r", dev_info_arr[i].addr);
                 Timonel::Status sts = tml_pool[i]->GetStatus();
-                if ((sts.features_code >> F_USE_WDT_RESET) & true) {
+                if ((sts.features_code >> F_APP_AUTORUN) & true) {
                     USE_SERIAL.printf_P("\n\r ***************************************************************************************\n\r");
-                    USE_SERIAL.printf_P(" * WARNING! The Timonel bootloader with TWI address %02d has the \"TIMEOUT_EXIT\" feature. *\n\r", dev_info_arr[i].addr);
+                    USE_SERIAL.printf_P(" * WARNING! The Timonel bootloader with TWI address %02d has the \"APP_AUTORUN\" feature. *\n\r", dev_info_arr[i].addr);
                     USE_SERIAL.printf_P(" * enabled. This TWI master firmware can't control it properly! Please recompile it    *\n\r");
                     USE_SERIAL.printf_P(" * using a configuration with that option disabled (e.g. \"tml-t85-small\").             *\n\r");
                     USE_SERIAL.printf_P(" ***************************************************************************************\n\r");
@@ -103,16 +111,23 @@ void setup() {
         USE_SERIAL.printf_P("\n\r");
         ThreeStarDelay();
         USE_SERIAL.printf_P("\n\n\r");
-        // Delete user applications from devices
-        for (byte i = 0; i <= (tml_count); i++) {
+        //
+        // *********************************************
+        // * Delete user applications from all devices *
+        // *********************************************
+        for (uint8_t i = 0; i <= (tml_count); i++) {
             if (dev_info_arr[i].firmware == "Timonel") {
                 delay(10);
                 USE_SERIAL.printf_P("Deleting application on device %d ", dev_info_arr[i].addr);
-                byte errors = tml_pool[i]->DeleteApplication();
+                uint8_t errors = tml_pool[i]->DeleteApplication();
+                // delay(500);
+                // tml_pool[i]->TwiCmdXmit(RESETMCU, ACKRESET);
+                // delay(500);
                 if (errors == 0) {
                     USE_SERIAL.printf_P("OK!\n\r");
                 } else {
                     USE_SERIAL.printf_P("Error! (%d)\n\r", errors);
+                    //Wire.begin(SDA, SCL);
                 }
                 delay(1000);
                 USE_SERIAL.printf_P("\n\rGetting status of device %d\n\r", dev_info_arr[i].addr);
@@ -122,11 +137,14 @@ void setup() {
         }
         ThreeStarDelay();
         USE_SERIAL.printf_P("\n\r");
-        // Upload user applications to devices and run them
-        for (byte i = 0; i <= (tml_count); i++) {
+        //
+        // ***************************************************
+        // * Upload and run user applications on all devices *
+        // ***************************************************
+        for (uint8_t i = 0; i <= (tml_count); i++) {
             if (dev_info_arr[i].firmware == "Timonel") {
                 USE_SERIAL.printf_P("\n\rUploading application to device %d, \x1b[5mPLEASE WAIT\x1b[0m ...", dev_info_arr[i].addr);
-                byte errors = tml_pool[i]->UploadApplication(payload, sizeof(payload));
+                uint8_t errors = tml_pool[i]->UploadApplication(payload, sizeof(payload));
                 if (errors == 0) {
                     USE_SERIAL.printf_P("\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b successful!      \n\r");
                 } else {
@@ -134,17 +152,35 @@ void setup() {
                 }
                 delay(10);
                 USE_SERIAL.printf_P("\n\rGetting status of device %d\n\r", dev_info_arr[i].addr);
+                tml_pool[i]->GetStatus();
                 PrintStatus(*tml_pool[i]);
                 delay(10);
+                // // If the Timonel features support it, dump the device memory
+                // Timonel::Status sts = tml_pool[i]->GetStatus();
+                // if ((sts.features_code >> F_CMD_READFLASH) & true) {
+                //     USE_SERIAL.printf_P("\n\rDumping device %d flash memory\n\r", dev_info_arr[i].addr);
+                //     tml_pool[i]->DumpMemory(MCU_TOTAL_MEM, SLV_PACKET_SIZE, 32);
+                // }
                 USE_SERIAL.printf_P("Running application on device %d\n\r", dev_info_arr[i].addr);
-                tml_pool[i]->RunApplication();
+                errors = tml_pool[i]->RunApplication();
+                delay(500);
+                if (errors == 0) {
+                    USE_SERIAL.printf_P("User application should be running\n\r");
+                } else {
+                    USE_SERIAL.printf_P("Bootloader exit to app error! (%d)           \n\r", errors);
+                }
+                delay(10);
+                delete tml_pool[i];
                 delay(1500);
             }
         }
-        // Reset applications and prepare for another cycle, then clean objects
+        //
+        // ************************************************************************
+        // * Reset applications and prepare for another cycle, then clean objects *
+        // ************************************************************************
         if (loop < LOOP_COUNT - 1) {
-            USE_SERIAL.printf_P("\n\rLetting application run 28 seconds before resetting and starting next cycle   ");
-            byte dly = 28;
+            uint8_t dly = 10;
+            USE_SERIAL.printf_P("\n\rLetting application run %d seconds before resetting and starting next cycle   ", dly);
             while (dly--) {
                 USE_SERIAL.printf_P("\b\b| ");
                 delay(250);
@@ -161,9 +197,10 @@ void setup() {
             // NOTE: All devices share the same application, since the application TWI address is
             // set at compile time, this is shared across all devices when the app is running.
             // Once discovered, the app TWI address is used to send the reset command to all devices.
-            byte app_addr = twi.ScanBus();
-            NbMicro *micro = new NbMicro;
-            micro->SetTwiAddress(app_addr); /* NOTE: All devices share the same TWI application address (44) */
+            uint8_t app_addr = twi_bus.ScanBus();
+            //NbMicro *micro = new NbMicro(0, SDA, SCL);
+            NbMicro *micro = new NbMicro(app_addr, SDA, SCL);
+            //micro->SetTwiAddress(app_addr); /* NOTE: All devices share the same TWI application address (44) */
             USE_SERIAL.printf_P("Resetting devices running application at address %d\n\r", micro->GetTwiAddress());
             micro->TwiCmdXmit(RESETMCU, ACKRESET);
             delay(1000);
@@ -172,14 +209,16 @@ void setup() {
         } else {
             USE_SERIAL.printf_P("\n\rCycle completed %d of %d passes! Letting application run ...\n\n\r", LOOP_COUNT, LOOP_COUNT);
         }
-        for (byte i = 0; i < tml_count; i++) {
-            delete tml_pool[i];
-        }
+        // for (uint8_t i = 0; i < tml_count; i++) {
+        //     delete tml_pool[i];
+        // }
     }
+    delay(3000);
 }
 
+// Main loop
 void loop() {
-  // Nothing
+    // Nothing
 }
 
 // Determine if there is a user application update available
@@ -189,10 +228,10 @@ bool CheckApplUpdate(void) {
 
 // Function clear screen
 void ClrScr() {
-    USE_SERIAL.write(27);        // ESC command
-    USE_SERIAL.printf_P("[2J");  // clear screen command
-    USE_SERIAL.write(27);        // ESC command
-    USE_SERIAL.printf_P("[H");   // cursor to home command
+    USE_SERIAL.write(27);     // ESC command
+    USE_SERIAL.print("[2J");  // clear screen command
+    USE_SERIAL.write(27);     // ESC command
+    USE_SERIAL.print("[H");   // cursor to home command
 }
 
 // Function PrintLogo
@@ -208,9 +247,9 @@ void PrintLogo(void) {
 // Function print Timonel instance status
 void PrintStatus(Timonel timonel) {
     Timonel::Status tml_status = timonel.GetStatus(); /* Get the instance id parameters received from the ATTiny85 */
-    byte twi_address = timonel.GetTwiAddress();
-    byte version_major = tml_status.version_major;
-    byte version_minor = tml_status.version_minor;
+    uint8_t twi_address = timonel.GetTwiAddress();
+    uint8_t version_major = tml_status.version_major;
+    uint8_t version_minor = tml_status.version_minor;
     if ((tml_status.signature == T_SIGNATURE) && ((version_major != 0) || (version_minor != 0))) {
         String version_mj_nick = "";
         switch (version_major) {
@@ -231,7 +270,7 @@ void PrintStatus(Timonel timonel) {
         USE_SERIAL.printf_P("(TWI: %02d)\n\r", twi_address);
         USE_SERIAL.printf_P(" ====================================\n\r");
         USE_SERIAL.printf_P(" Bootloader address: 0x%X\n\r", tml_status.bootloader_start);
-        word app_start = tml_status.application_start;
+        uint16_t app_start = tml_status.application_start;
         if (app_start != 0xFFFF) {
             USE_SERIAL.printf_P("  Application start: 0x%X (0x%X)\n\r", app_start, tml_status.trampoline_addr);
         } else {
@@ -256,7 +295,7 @@ void PrintStatus(Timonel timonel) {
 // Function ThreeStarDelay
 void ThreeStarDelay(void) {
     delay(2000);
-    for (byte i = 0; i < 3; i++) {
+    for (uint8_t i = 0; i < 3; i++) {
         USE_SERIAL.printf_P("*");
         delay(1000);
     }
@@ -266,22 +305,5 @@ void ThreeStarDelay(void) {
 void ShowHeader(void) {
     //ClrScr();
     delay(250);
-    USE_SERIAL.printf_P("\n\rTimonel TWI Bootloader and Application Test (v1.4 twim-ms)\n\r");
-}
-
-// Function ShowMenu
-void ShowMenu(void) {
-    if (app_mode == true) {
-        USE_SERIAL.printf_P("Application command ('a', 's', 'z' reboot, 'x' reset MCU, '?' help): ");
-    } else {
-        Timonel::Status sts /*= tml.GetStatus()*/;
-        USE_SERIAL.printf_P("Timonel bootloader ('v' version, 'r' run app, 'e' erase flash, 'w' write flash");
-        if ((sts.features_code & 0x08) == 0x08) {
-            USE_SERIAL.printf_P(", 'b' set addr");
-        }
-        if ((sts.features_code & 0x80) == 0x80) {
-            USE_SERIAL.printf_P(", 'm' mem dump");
-        }
-        USE_SERIAL.printf_P("): ");
-    }
+    USE_SERIAL.printf_P("\n\r Timonel TWI Bootloader Multi Slave Test (v1.5 twim-ms)\n\r");
 }

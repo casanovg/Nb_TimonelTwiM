@@ -4,7 +4,7 @@
  *  ...........................................
  *  File: TimonelTwiM.h (Header)
  *  ........................................... 
- *  Version: 1.0.1 / 2020-05-07
+ *  Version: 1.1.0 / 2020-05-07
  *  gustavo.casanova@gmail.com
  *  ...........................................
  *  This library enables uploading firmware to a microcontroller
@@ -23,46 +23,46 @@
 // Class Timonel: Represents an ATTiny85/45/25 microcontroller running the Timonel bootloader
 class Timonel : public NbMicro {
    public:
-    Timonel(const byte twi_address = 0, const byte sda = 0, const byte scl = 0);
+    Timonel(const uint8_t twi_address = 0, const uint8_t sda = 0, const uint8_t scl = 0);
     ~Timonel();
     typedef struct tml_status_ {
-        byte signature = 0;
-        byte version_major = 0;
-        byte version_minor = 0;
-        byte features_code = 0;
-        byte ext_features_code = 0;
-        word bootloader_start = 0;
-        word application_start = 0;
-        word trampoline_addr = 0;
-        byte low_fuse_setting = 0;
-        byte oscillator_cal = 0;
-        byte check_empty_fl = 0;
+        uint8_t signature = 0;
+        uint8_t version_major = 0;
+        uint8_t version_minor = 0;
+        uint8_t features_code = 0;
+        uint8_t ext_features_code = 0;
+        uint16_t bootloader_start = 0;
+        uint16_t application_start = 0;
+        uint16_t trampoline_addr = 0;
+        uint8_t low_fuse_setting = 0;
+        uint8_t oscillator_cal = 0;
+        uint8_t check_empty_fl = 0;
     } Status;
     Status GetStatus(void);
-    byte SetTwiAddress(byte twi_address);
-    byte RunApplication(void);
-    byte DeleteApplication(void);
-    byte UploadApplication(byte payload[],
-                           int payload_size,
-                           const int start_address = 0);
+    uint8_t SetTwiAddress(uint8_t twi_address);
+    uint8_t RunApplication(void);
+    uint8_t DeleteApplication(void);
+    uint8_t UploadApplication(uint8_t payload[],
+                              uint16_t payload_size,
+                              const uint16_t start_address = 0);
 #if ((defined FEATURES_CODE) && ((FEATURES_CODE >> F_CMD_READFLASH) & true))
-    byte DumpMemory(const word flash_size = MCU_TOTAL_MEM,
-                    const byte rx_packet_size = SLV_PACKET_SIZE,
-                    const byte values_per_line = VALUES_PER_LINE);
+    uint8_t DumpMemory(const uint16_t flash_size = MCU_TOTAL_MEM,
+                       const uint8_t rx_packet_size = SLV_PACKET_SIZE,
+                       const uint8_t values_per_line = VALUES_PER_LINE);
 #endif /* FEATURES_CODE >> F_CMD_READFLASH */
 
    private:
     Status status_; /* Global struct that holds a Timonel instance's running status */
-    byte BootloaderInit(void);
-    byte QueryStatus(void);
-    byte SendDataPacket(const byte data_packet[]);
+    uint8_t BootloaderInit(void);
+    uint8_t QueryStatus(void);
+    uint8_t SendDataPacket(const uint8_t data_packet[]);
 #if (!((defined FEATURES_CODE) && ((FEATURES_CODE >> F_AUTO_PAGE_ADDR) & true)))
-    byte SetPageAddress(const word page_addr);
-    byte FillSpecialPage(const byte page_type,
-                         const byte app_reset_msb = 0,
-                         const byte app_reset_lsb = 0);
-    word CalculateTrampoline(const word bootloader_start,
-                             const word application_start);
+    uint8_t SetPageAddress(const uint16_t page_addr);
+    uint8_t FillSpecialPage(const uint8_t page_type,
+                            const uint8_t app_reset_msb = 0,
+                            const uint8_t app_reset_lsb = 0);
+    uint16_t CalculateTrampoline(const uint16_t bootloader_start,
+                                 const uint16_t application_start);
 #endif /* FEATURES_CODE >> F_CMD_SETPGADDR */
 };
 

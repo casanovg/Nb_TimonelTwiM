@@ -17,8 +17,8 @@ TWI_ADDR = 44
 ## If you move either the current folder or the Library folder, you'll 
 ##  need to change this path to match.
 ## LIBDIR = ../../AVR-Programming-Library (default)
-LIBDIR = ./nb-libs/twis/interrupt-based
-CMDDIR = ./nb-libs/cmd
+LIBDIR = ../../nb-libs/twis/interrupt-based
+CMDDIR = ../../nb-libs/cmd
 
 ##########------------------------------------------------------##########
 ##########                 Programmer Defaults                  ##########
