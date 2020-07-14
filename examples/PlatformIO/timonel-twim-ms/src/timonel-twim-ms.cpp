@@ -5,9 +5,9 @@
   ----------------------------------------------------------------------------
   This demo shows how to control and update several Tiny85 microcontrollers
   running the Timonel bootloader from an ESP8266 master.
-  It uses a serial console configured at 9600 N 8 1 for feedback.
+  It uses a serial console configured at 115200 N 8 1 for feedback.
   ----------------------------------------------------------------------------
-  2020-06-03 Gustavo Casanova
+  2020-07-13 Gustavo Casanova
   ----------------------------------------------------------------------------
 */
 
@@ -31,13 +31,6 @@
 
 #include "payload.h"
 
-#define USE_SERIAL Serial
-#define SDA 2  // I2C SDA pin - ESP8266 2 - ESP32 21
-#define SCL 0  // I2C SCL pin - ESP8266 0 - ESP32 22
-#define MAX_TWI_DEVS 28
-#define LOOP_COUNT 3
-#define T_SIGNATURE 84
-
 // Global variables
 uint8_t slave_address = 0;
 uint8_t block_rx_size = 0;
@@ -49,7 +42,7 @@ void (*resetFunc)(void) = 0;
 // Setup block
 void setup() {
     // Initialize the serial port for debugging
-    USE_SERIAL.begin(9600);
+    USE_SERIAL.begin(SERIAL_BPS);
     ClrScr();
     PrintLogo();
     ShowHeader();
@@ -196,7 +189,7 @@ void setup() {
                 USE_SERIAL.println(dev_info_arr[i].addr);
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                 tml_pool[i]->GetStatus();
-                PrintStatus(*tml_pool[i]);
+                PrintStatus(tml_pool[i]);
             }
         }
         ThreeStarDelay();
@@ -242,7 +235,7 @@ void setup() {
                 USE_SERIAL.println(dev_info_arr[i].addr);
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                 tml_pool[i]->GetStatus();
-                PrintStatus(*tml_pool[i]);
+                PrintStatus(tml_pool[i]);
                 delay(10);
 #if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                 // // If the Timonel features support it, dump the device memory
@@ -393,11 +386,16 @@ void PrintLogo(void) {
 }
 
 // Function print Timonel instance status
-void PrintStatus(Timonel timonel) {
-    Timonel::Status tml_status = timonel.GetStatus(); /* Get the instance id parameters received from the ATTiny85 */
-    uint8_t twi_address = timonel.GetTwiAddress();
+Timonel::Status PrintStatus(Timonel *timonel) {
+    Timonel::Status tml_status = timonel->GetStatus(); /* Get the instance id parameters received from the ATTiny85 */
+    uint8_t twi_address = timonel->GetTwiAddress();
     uint8_t version_major = tml_status.version_major;
     uint8_t version_minor = tml_status.version_minor;
+    uint16_t app_start = tml_status.application_start;
+    uint8_t app_start_msb = ((tml_status.application_start >> 8) & 0xFF);
+    uint8_t app_start_lsb = (tml_status.application_start & 0xFF);
+    uint16_t trampoline = ((~(((app_start_lsb << 8) | app_start_msb) & 0xFFF)) + 1);
+    trampoline = ((((tml_status.bootloader_start >> 1) - trampoline) & 0xFFF) << 1);
     if ((tml_status.signature == T_SIGNATURE) && ((version_major != 0) || (version_minor != 0))) {
         String version_mj_nick = "";
         switch (version_major) {
@@ -419,70 +417,80 @@ void PrintStatus(Timonel timonel) {
         USE_SERIAL.printf_P("(TWI: %02d)\n\r", twi_address);
         USE_SERIAL.printf_P(" ====================================\n\r");
         USE_SERIAL.printf_P(" Bootloader address: 0x%X\n\r", tml_status.bootloader_start);
-        uint16_t app_start = tml_status.application_start;
         if (app_start != 0xFFFF) {
-            USE_SERIAL.printf_P("  Application start: 0x%X (0x%X)\n\r", app_start, tml_status.trampoline_addr);
+            USE_SERIAL.printf_P("  Application start: 0x%04X (0x%X)\n\r", app_start, trampoline);
         } else {
-            USE_SERIAL.printf_P("  Application start: 0x%X (Not Set)\n\r", app_start);
+            USE_SERIAL.printf_P("  Application start: 0x%04X (Not Set)\n\r", app_start);
         }
         USE_SERIAL.printf_P("      Features code: %d | %d ", tml_status.features_code, tml_status.ext_features_code);
-        if ((tml_status.ext_features_code >> F_AUTO_CLK_TWEAK) & true) {
+        if ((tml_status.ext_features_code >> E_AUTO_CLK_TWEAK) & true) {
             USE_SERIAL.printf_P("(Auto)");
         } else {
             USE_SERIAL.printf_P("(Fixed)");
         }
         USE_SERIAL.printf_P("\n\r");
         USE_SERIAL.printf_P("           Low fuse: 0x%02X\n\r", tml_status.low_fuse_setting);
-        USE_SERIAL.printf_P("             RC osc: 0x%02X\n\n\r", tml_status.oscillator_cal);
+        USE_SERIAL.printf_P("             RC osc: 0x%02X", tml_status.oscillator_cal);
+#if ((defined EXT_FEATURES) && ((EXT_FEATURES >> E_CMD_READDEVS) & true))
+        if ((tml_status.ext_features_code >> E_CMD_READDEVS) & true) {
+            Timonel::DevSettings dev_settings = timonel->GetDevSettings();
+            USE_SERIAL.printf_P("\n\r ....................................\n\r");
+            USE_SERIAL.printf_P(" Fuse settings: L=0x%02X H=0x%02X E=0x%02X\n\r", dev_settings.low_fuse_bits, dev_settings.high_fuse_bits, dev_settings.extended_fuse_bits);
+            USE_SERIAL.printf_P(" Lock bits: 0x%02X\n\r", dev_settings.lock_bits);
+            USE_SERIAL.printf_P(" Signature: 0x%02X 0x%02X 0x%02X\n\r", dev_settings.signature_byte_0, dev_settings.signature_byte_1, dev_settings.signature_byte_2);
+            USE_SERIAL.printf_P(" Oscillator: 8.0Mhz=0x%02X, 6.4Mhz=0x%02X", dev_settings.calibration_0, dev_settings.calibration_1);
+        }
+#endif  // E_CMD_READDEVS
+        USE_SERIAL.printf_P("\n\n\r");
 #else   // -----
-        USE_SERIAL.print("\n\r Timonel v");
-        USE_SERIAL.print(version_major);
-        USE_SERIAL.print(".");
-        USE_SERIAL.print(version_minor);
-        USE_SERIAL.print(" ");
-        USE_SERIAL.print(version_mj_nick.c_str());
-        USE_SERIAL.print(" TWI: ");
-        USE_SERIAL.println(twi_address);
-        USE_SERIAL.println(" ====================================");
-        USE_SERIAL.print(" Bootloader address: 0x");
-        USE_SERIAL.println(tml_status.bootloader_start, HEX);
-        uint16_t app_start = tml_status.application_start;
-        if (app_start != 0xFFFF) {
-            USE_SERIAL.print("  Application start: 0x");
-            USE_SERIAL.print(app_start, HEX);
-            USE_SERIAL.print(" - 0x");
-            USE_SERIAL.println(tml_status.trampoline_addr, HEX);
-        } else {
-            USE_SERIAL.print("  Application start: Not set: 0x");
-            USE_SERIAL.println(app_start, HEX);
-        }
-        USE_SERIAL.print("      Features code: ");
-        USE_SERIAL.print(tml_status.features_code);
-        USE_SERIAL.print(" | ");
-        USE_SERIAL.print(tml_status.ext_features_code);
-        if ((tml_status.ext_features_code >> F_AUTO_CLK_TWEAK) & true) {
-            USE_SERIAL.print(" (Auto)");
-        } else {
-            USE_SERIAL.print(" (Fixed)");
-        }
-        USE_SERIAL.println("");
-        USE_SERIAL.print("           Low fuse: 0x");
-        USE_SERIAL.println(tml_status.low_fuse_setting, HEX);
-        USE_SERIAL.print("             RC osc: 0x");
-        USE_SERIAL.println(tml_status.oscillator_cal, HEX);
+            USE_SERIAL.print("\n\r Timonel v");
+            USE_SERIAL.print(version_major);
+            USE_SERIAL.print(".");
+            USE_SERIAL.print(version_minor);
+            USE_SERIAL.print(" ");
+            USE_SERIAL.print(version_mj_nick.c_str());
+            USE_SERIAL.print(" TWI: ");
+            USE_SERIAL.println(twi_address);
+            USE_SERIAL.println(" ====================================");
+            USE_SERIAL.print(" Bootloader address: 0x");
+            USE_SERIAL.println(tml_status.bootloader_start, HEX);
+            if (app_start != 0xFFFF) {
+                USE_SERIAL.print("  Application start: 0x");
+                USE_SERIAL.print(app_start, HEX);
+                USE_SERIAL.print(" - 0x");
+                USE_SERIAL.println(trampoline, HEX);
+            } else {
+                USE_SERIAL.print("  Application start: Not set: 0x");
+                USE_SERIAL.println(app_start, HEX);
+            }
+            USE_SERIAL.print("      Features code: ");
+            USE_SERIAL.print(tml_status.features_code);
+            USE_SERIAL.print(" | ");
+            USE_SERIAL.print(tml_status.ext_features_code);
+            if ((tml_status.ext_features_code >> F_AUTO_CLK_TWEAK) & true) {
+                USE_SERIAL.print(" (Auto)");
+            } else {
+                USE_SERIAL.print(" (Fixed)");
+            }
+            USE_SERIAL.println("");
+            USE_SERIAL.print("           Low fuse: 0x");
+            USE_SERIAL.println(tml_status.low_fuse_setting, HEX);
+            USE_SERIAL.print("             RC osc: 0x");
+            USE_SERIAL.println(tml_status.oscillator_cal, HEX);
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     } else {
 #if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
-        USE_SERIAL.printf_P("\n\r *******************************************************************\n\r");
-        USE_SERIAL.printf_P(" * Unknown bootloader, application or device at TWI address %02d ... *\n\r", twi_address);
-        USE_SERIAL.printf_P(" *******************************************************************\n\n\r");
+        USE_SERIAL.printf_P("\n\r *************************************************\n\r");
+        USE_SERIAL.printf_P(" * User application running on TWI device %02d ... *\n\r", twi_address);
+        USE_SERIAL.printf_P(" *************************************************\n\n\r");
 #else   // -----
-        USE_SERIAL.println("\n\r *******************************************************************");
-        USE_SERIAL.print(" * Unknown bootloader, application or device at TWI address ");
-        USE_SERIAL.println(twi_address);
-        USE_SERIAL.println(" *******************************************************************\n");
+            USE_SERIAL.println("\n\r *******************************************************************");
+            USE_SERIAL.print(" * Unknown bootloader, application or device at TWI address ");
+            USE_SERIAL.println(twi_address);
+            USE_SERIAL.println(" *******************************************************************\n");
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     }
+    return tml_status;
 }
 
 // Function ThreeStarDelay
@@ -503,8 +511,10 @@ void ShowHeader(void) {
     //ClrScr();
     delay(250);
 #if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
-    USE_SERIAL.printf_P("\n\r Timonel TWI Bootloader Multi Slave Test (v1.5 twim-ms)\n\r");
+    USE_SERIAL.printf_P("\n\r..............................................................\n\r");
+    USE_SERIAL.printf_P(". Timonel I2C Bootloader Multi Slave Test (v%d.%d twim-ms) .\n\r", VER_MAJOR, VER_MINOR);
+    USE_SERIAL.printf_P("..............................................................\n\r");
 #else   // -----
-    USE_SERIAL.println("\n\r Timonel TWI Bootloader Multi Slave Test (v1.5 twim-ms)");
+    USE_SERIAL.println("\n\r Timonel TWI Bootloader Multi Slave Test (twim-ms)");
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
 }

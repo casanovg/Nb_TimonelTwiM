@@ -4,7 +4,7 @@
  *  ...........................................
  *  File: TimonelTwiM.cpp (Library)
  *  ........................................... 
- *  Version: 1.1.0 / 2020-05-07
+ *  Version: 1.2.0 / 2020-07-13
  *  gustavo.casanova@gmail.com
  *  ...........................................
  *  This library enables uploading firmware to a microcontroller
@@ -32,7 +32,9 @@ Timonel::Timonel(const uint8_t twi_address, const uint8_t sda, const uint8_t scl
 
 // Class destructor
 Timonel::~Timonel() {
-    // Destructor
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
+    USE_SERIAL.printf_P("[%s] Removing bootloader instance with TWI address %02d ...\r\n", __func__, addr_);
+#endif  // DEBUG_LEVEL
 }
 
 /* _________________________
@@ -103,6 +105,7 @@ uint8_t Timonel::DeleteApplication(void) {
 #endif /* DEBUG_LEVEL */
     uint8_t twi_errors = TwiCmdXmit(DELFLASH, ACKDELFL);
     delay(DLY_DEL_INIT); /* Long delay (~750 ms) to allow complete erasing before trying to initialize */
+    TwiCmdXmit(NO_OP, UNKNOWNC); // Resync after deletion
     twi_errors += BootloaderInit();
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     if (twi_errors > 0) {
@@ -350,9 +353,9 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
         return ERR_NOT_SUPP;
     }
-    const uint8_t cmd_size = D_CMD_LENGTH;
+    const uint8_t cmd_size = DMP_CMD_LENGTH;
     uint8_t twi_cmd_arr[cmd_size] = {READFLSH, 0, 0, 0};
-    uint8_t twi_reply_arr[rx_packet_size + D_REPLY_OVRHD];
+    uint8_t twi_reply_arr[rx_packet_size + DMP_REPLY_OVRHD];
     uint8_t checksum_errors = 0;
     uint8_t line_ix = 1;
     twi_cmd_arr[3] = rx_packet_size; /* Requested packet size */
@@ -369,7 +372,7 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
     for (uint16_t address = 0; address < flash_size; address += rx_packet_size) {
         twi_cmd_arr[1] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
         twi_cmd_arr[2] = (address & 0xFF);          /* Flash page address low byte */
-        uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDFSH, twi_reply_arr, rx_packet_size + D_REPLY_OVRHD);
+        uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDFSH, twi_reply_arr, rx_packet_size + DMP_REPLY_OVRHD);
         if (twi_errors == 0) {
             uint8_t expected_checksum = 0;
             for (uint8_t i = 1; i < (rx_packet_size + 1); i++) {
@@ -476,11 +479,144 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
 #pragma GCC warning "Timonel::DumpMemory function code NOT INCLUDED in TWI master!"
 #endif /* FEATURES_CODE >> F_CMD_READFLASH */
 
+/* ________________________
+  |                        | 
+  |     GetDevSettings     |
+  |________________________|
+*/
+// Retrieves microcontroller signature, fuse bits and lock bits
+#if ((defined EXT_FEATURES) && ((EXT_FEATURES >> E_CMD_READDEVS) & true))
+//#pragma GCC warning "Timonel::GetDevSettings function code included in TWI master!"
+Timonel::DevSettings Timonel::GetDevSettings(void) {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
+    USE_SERIAL.printf_P("\n\r[%s] Querying device %02d to get signature, fuse and lock bits ...\n\r", __func__, addr_);
+#endif                                           /* DEBUG_LEVEL */
+    uint8_t twi_reply_arr[D_REPLY_LENGTH] = {0}; /* Status received from I2C slave */
+    uint8_t twi_errors = TwiCmdXmit(READDEVS, ACKRDEVS, twi_reply_arr, D_REPLY_LENGTH);
+    DevSettings dev_settings;
+    if (twi_errors != 0) {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
+        USE_SERIAL.printf_P("\n\r[%s] Error getting device %02d settings (%d) ...\n\r", __func__, addr_, twi_errors);
+#endif /* DEBUG_LEVEL */
+    } else {
+        dev_settings.low_fuse_bits = twi_reply_arr[D_LOW_FUSE];
+        dev_settings.high_fuse_bits = twi_reply_arr[D_HIGH_FUSE];
+        dev_settings.extended_fuse_bits = twi_reply_arr[D_EXTENDED_FUSE];
+        dev_settings.lock_bits = twi_reply_arr[D_LOCK_BITS];
+        dev_settings.signature_byte_0 = twi_reply_arr[D_SIGNATURE_0];
+        dev_settings.signature_byte_1 = twi_reply_arr[D_SIGNATURE_1];
+        dev_settings.signature_byte_2 = twi_reply_arr[D_SIGNATURE_2];
+        dev_settings.calibration_0 = twi_reply_arr[D_OSC_CALIB_0];
+        dev_settings.calibration_1 = twi_reply_arr[D_OSC_CALIB_1];
+    }
+    return dev_settings;
+}
+#endif  // EXT_FEATURES >> F_CMD_READDEVS
+
+#if ((defined EXT_FEATURES) && ((EXT_FEATURES >> E_EEPROM_ACCESS) & true))
+/* _______________________
+  |                       | 
+  |      WriteEeprom      |
+  |_______________________|
+*/
+// Write a byte to the microcontroller EEPROM
+bool Timonel::WriteEeprom(const uint16_t eeprom_addr, uint8_t data_byte) {
+    //uint8_t Timonel::SetPageAddress(const uint16_t page_addr) {
+    const uint8_t cmd_size = 5;
+    const uint8_t reply_size = 2;
+    uint8_t twi_cmd_arr[cmd_size] = {WRITEEPR, 0, 0, 0, 0};
+    uint8_t twi_reply_arr[reply_size];
+    twi_cmd_arr[1] = ((eeprom_addr & 0xFF00) >> 8); /* Flash page address MSB */
+    twi_cmd_arr[2] = (eeprom_addr & 0xFF);          /* Flash page address LSB */
+    twi_cmd_arr[3] = data_byte;
+    twi_cmd_arr[4] = (uint8_t)(twi_cmd_arr[1] + twi_cmd_arr[2] + twi_cmd_arr[3]); /* Checksum */
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL == 1))
+    USE_SERIAL.printf_P(" (a:%02X%02X) ", twi_cmd_arr[1], twi_cmd_arr[2]);
+#elif ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+    USE_SERIAL.printf_P("\n\n\r[%s] >> Writing 0x%02X to device EEPROM address 0x%04X \n\r", __func__, data_byte, eeprom_addr);
+#endif /* DEBUG_LEVEL */
+    uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKWTEEP, twi_reply_arr, reply_size);
+    if (twi_errors == 0) {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+        USE_SERIAL.printf_P("[%s] >> Command %d parsed OK <<< %d\n\r", __func__, twi_cmd_arr[0], twi_reply_arr[0]);
+#endif /* DEBUG_LEVEL */
+        if (twi_reply_arr[1] == twi_cmd_arr[4]) {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+            USE_SERIAL.printf_P("[%s] >> Operands %d and %d parsed OK by Timonel <<< Flash Page Address Check = %d\n\r", __func__, twi_cmd_arr[1], twi_cmd_arr[2], twi_reply_arr[1]);
+#endif /* DEBUG_LEVEL */
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+            USE_SERIAL.printf_P("[%s] Address %04X (%02X) (%02X) parsed OK by Timonel <<< Check = %d\n\r", __func__, page_addr, twi_cmd_arr[1], twi_cmd_arr[2], twi_reply_arr[1]);
+#endif /* DEBUG_LEVEL */
+        } else {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+            USE_SERIAL.printf_P("[%s] Operand %d parsed with ERROR <<< Timonel Check = %d\r\n", __func__, twi_cmd_arr[1], twi_reply_arr[1]);
+#endif /* DEBUG_LEVEL */
+        }
+    } else {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+        USE_SERIAL.printf_P("[%s] Error parsing 0x%02X command! <<< %02X\n\r", __func__, twi_cmd_arr[0], twi_reply_arr[0]);
+#endif /* DEBUG_LEVEL */
+    }
+    return twi_errors;
+}
+
+/* ______________________
+  |                      | 
+  |      ReadEeprom      |
+  |______________________|
+*/
+// Read a byte from the microcontroller EEPROM
+uint8_t Timonel::ReadEeprom(const uint16_t eeprom_addr) {
+    //uint8_t Timonel::SetPageAddress(const uint16_t page_addr) {
+    const uint8_t cmd_size = 4;
+    const uint8_t reply_size = 3;
+    uint8_t twi_cmd_arr[cmd_size] = {READEEPR, 0, 0, 0};
+    uint8_t twi_reply_arr[reply_size];
+    twi_cmd_arr[1] = ((eeprom_addr & 0xFF00) >> 8); /* Flash page address MSB */
+    twi_cmd_arr[2] = (eeprom_addr & 0xFF);          /* Flash page address LSB */
+    twi_cmd_arr[3] = (uint8_t)(twi_cmd_arr[1] + twi_cmd_arr[2]); /* Checksum */
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL == 1))
+    USE_SERIAL.printf_P(" (a:%02X%02X) ", twi_cmd_arr[1], twi_cmd_arr[2]);
+#elif ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+    USE_SERIAL.printf_P("\n\n\r[%s] >> Writing 0x%02X to device EEPROM address 0x%04X \n\r", __func__, data_byte, eeprom_addr);
+#endif /* DEBUG_LEVEL */
+    uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDEEP, twi_reply_arr, reply_size);
+    if (twi_errors == 0) {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+        USE_SERIAL.printf_P("[%s] >> Command %d parsed OK <<< %d\n\r", __func__, twi_cmd_arr[0], twi_reply_arr[0]);
+#endif /* DEBUG_LEVEL */
+        if (twi_reply_arr[2] == (twi_cmd_arr[1] + eeprom_addr)) {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+            USE_SERIAL.printf_P("[%s] >> Operands %d and %d parsed OK by Timonel <<< Flash Page Address Check = %d\n\r", __func__, twi_cmd_arr[1], twi_cmd_arr[2], twi_reply_arr[1]);
+#endif /* DEBUG_LEVEL */
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+            USE_SERIAL.printf_P("[%s] Address %04X (%02X) (%02X) parsed OK by Timonel <<< Check = %d\n\r", __func__, page_addr, twi_cmd_arr[1], twi_cmd_arr[2], twi_reply_arr[1]);
+#endif /* DEBUG_LEVEL */
+        } else {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+            USE_SERIAL.printf_P("[%s] Operand %d parsed with ERROR <<< Timonel Check = %d\r\n", __func__, twi_cmd_arr[1], twi_reply_arr[1]);
+#endif /* DEBUG_LEVEL */
+        }
+    } else {
+#if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 2))
+        USE_SERIAL.printf_P("[%s] Error parsing 0x%02X command! <<< %02X\n\r", __func__, twi_cmd_arr[0], twi_reply_arr[0]);
+#endif /* DEBUG_LEVEL */
+    }
+    return twi_reply_arr[1];
+    //return twi_errors;
+}
+#endif  // EXT_FEATURES >> E_EEPROM_ACCESS
+
 /////////////////////////////////////////////////////////////////////////////
 ////////////                 Internal functions                  ////////////
 /////////////////////////////////////////////////////////////////////////////
 
-// Function BootloaderInit (Initializes Timonel in 1 or 2 steps, as required by its features)
+/* ________________________
+  |                        | 
+  |     BootloaderInit     |
+  |________________________|
+*/
+// Initializes Timonel in 1 or 2 steps, as required by its features
 uint8_t Timonel::BootloaderInit(void) {
     uint8_t twi_errors = 0;
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
@@ -495,16 +631,24 @@ uint8_t Timonel::BootloaderInit(void) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
         USE_SERIAL.printf_P("[%s] Timonel device %02d * Initialization Step 2 required by features *\r\n", __func__, addr_);
 #endif /* DEBUG_LEVEL */
-        // Timonel initialization: STEP 2 (Only if it has this feature enabled)
-        twi_errors += NbMicro::InitMicro();
+        // Timonel initialization: STEP 2 (Only if the device has this feature enabled)
+        delay(DLY_TWO_STEP);
+        twi_errors += TwiCmdXmit(NO_OP, UNKNOWNC); // Resync I2C (recover after deletion)
+        delay(DLY_TWO_STEP);
+        twi_errors += InitMicro();
     }
-#else
+#else  // No two-step init 
 #pragma GCC warning "Two-step initialization code NOT INCLUDED in Timonel::BootloaderInit!"
 #endif /* FEATURES_CODE >> F_TWO_STEP_INIT */
     return twi_errors;
 }
 
-// Function QueryStatus (Retrieves the bootloader running parameters from the microcontroller)
+/* _____________________
+  |                     | 
+  |     QueryStatus     |
+  |_____________________|
+*/
+// Retrieves the bootloader running parameters from the microcontroller
 uint8_t Timonel::QueryStatus(void) {
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL >= 1))
     USE_SERIAL.printf_P("[%s] Querying Timonel device %02d to get status ...\r\n", __func__, addr_);
@@ -525,9 +669,11 @@ uint8_t Timonel::QueryStatus(void) {
             status_.ext_features_code = twi_reply_arr[S_EXT_FEATURES];
             status_.bootloader_start = (twi_reply_arr[S_BOOT_ADDR_MSB] << 8) + twi_reply_arr[S_BOOT_ADDR_LSB];
             status_.application_start = (twi_reply_arr[S_APPL_ADDR_LSB] << 8) + twi_reply_arr[S_APPL_ADDR_MSB];
-            status_.trampoline_addr = (~(((twi_reply_arr[S_APPL_ADDR_MSB] << 8) | twi_reply_arr[S_APPL_ADDR_LSB]) & 0xFFF));
-            status_.trampoline_addr++;
-            status_.trampoline_addr = ((((status_.bootloader_start >> 1) - status_.trampoline_addr) & 0xFFF) << 1);
+            // The slave application absolute address pointed to by the trampoline bytes should
+            // be calculated by the TWIM application starting from v1.5 library release ...
+            // ..... status_.trampoline_addr = (~(((twi_reply_arr[S_APPL_ADDR_MSB] << 8) | twi_reply_arr[S_APPL_ADDR_LSB]) & 0xFFF));
+            // ..... status_.trampoline_addr++;
+            // ....  status_.trampoline_addr = ((((status_.bootloader_start >> 1) - status_.trampoline_addr) & 0xFFF) << 1);
             status_.low_fuse_setting = twi_reply_arr[S_LOW_FUSE];
             status_.oscillator_cal = twi_reply_arr[S_OSCCAL];
         }
@@ -535,7 +681,12 @@ uint8_t Timonel::QueryStatus(void) {
     }
 }
 
-// Function SendDataPacket (Sends a data packet, a memory page fraction, to Timonel)
+/* ________________________
+  |                        | 
+  |     SendDataPacket     |
+  |________________________|
+*/
+// Sends a data packet, a memory page fraction, to Timonel
 uint8_t Timonel::SendDataPacket(const uint8_t data_packet[]) {
     const uint8_t cmd_size = MST_PACKET_SIZE + 2;
     const uint8_t reply_size = 2;
@@ -570,7 +721,12 @@ uint8_t Timonel::SendDataPacket(const uint8_t data_packet[]) {
     return twi_errors;
 }
 
-// Function SetPageAddres (Sets the start address of a flash memory page)
+/* ________________________
+  |                        | 
+  |     SetPageAddress     |
+  |________________________|
+*/
+// Sets the start address of a flash memory page
 #if (!((defined FEATURES_CODE) && ((FEATURES_CODE >> F_AUTO_PAGE_ADDR) & true)))
 //#pragma GCC warning "Timonel::SetPageAddress, FillSpecialPage and CalculateTrampoline functions code included in TWI master!"
 uint8_t Timonel::SetPageAddress(const uint16_t page_addr) {
@@ -611,7 +767,12 @@ uint8_t Timonel::SetPageAddress(const uint16_t page_addr) {
     return twi_errors;
 }
 
-// Function FillSpecialPage (Fills a reset or trampoline page, as required by Timonel features)
+/* _________________________
+  |                         | 
+  |     FillSpecialPage     |
+  |_________________________|
+*/
+// Fills a reset or trampoline page, as required by Timonel features
 uint8_t Timonel::FillSpecialPage(const uint8_t page_type, const uint8_t app_reset_msb, const uint8_t app_reset_lsb) {
     uint16_t address = 0x0000;
     uint8_t packet_ix = 0; /* TWI (I2C) data packet internal byte index */
@@ -673,7 +834,12 @@ uint8_t Timonel::FillSpecialPage(const uint8_t page_type, const uint8_t app_rese
     return twi_errors;
 }
 
-// Function CalculateTrampoline (Calculates the application trampoline address)
+/* _____________________________
+  |                             | 
+  |     CalculateTrampoline     |
+  |_____________________________|
+*/
+// Calculates the application trampoline address
 uint16_t Timonel::CalculateTrampoline(uint16_t bootloader_start, uint16_t application_start) {
     return (((~((bootloader_start >> 1) - ((application_start + 1) & 0x0FFF)) + 1) & 0x0FFF) | 0xC000);
 }
