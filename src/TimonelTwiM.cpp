@@ -4,7 +4,7 @@
  *  ...........................................
  *  File: TimonelTwiM.cpp (Library)
  *  ........................................... 
- *  Version: 1.2.0 / 2020-07-13
+ *  Version: 1.3.0 / 2021-06-13
  *  gustavo.casanova@gmail.com
  *  ...........................................
  *  This library enables uploading firmware to a microcontroller
@@ -370,8 +370,8 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
     USE_SERIAL.print("Addr 0: ");
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     for (uint16_t address = 0; address < flash_size; address += rx_packet_size) {
-        twi_cmd_arr[1] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
-        twi_cmd_arr[2] = (address & 0xFF);          /* Flash page address low byte */
+        twi_cmd_arr[1] = (address & 0xFF);          /* Flash page address low byte */
+        twi_cmd_arr[2] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
         uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDFSH, twi_reply_arr, rx_packet_size + DMP_REPLY_OVRHD);
         if (twi_errors == 0) {
             uint8_t expected_checksum = 0;

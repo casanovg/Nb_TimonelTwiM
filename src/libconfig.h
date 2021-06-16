@@ -3,7 +3,7 @@
   =================================
   Timonel TWI Master configuration
   ---------------------------------
-  Version: 1.2.0 / 2020-07-13
+  Version: 1.3.0 / 2021-06-13
   gustavo.casanova@gmail.com
   ---------------------------------
 */
