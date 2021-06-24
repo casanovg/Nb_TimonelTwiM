@@ -694,11 +694,21 @@ uint8_t Timonel::SendDataPacket(const uint8_t data_packet[]) {
     uint8_t twi_reply_arr[reply_size] = {0};
     uint8_t checksum = 0;
     twi_cmd[0] = WRITPAGE;
-    for (int i = 1; i < cmd_size - 1; i+=2) {
-        twi_cmd[i + 1] = data_packet[i - 1];        // -> Reverse WRITPAGE endianness {{{}}}
-        twi_cmd[i] = data_packet[i];                // -> Reverse WRITPAGE endianness {{{}}}
-        checksum += (uint8_t)data_packet[i - 1];    /* Data checksum accumulator (mod 256) */
-        checksum += (uint8_t)data_packet[i];        /* Data checksum accumulator (mod 256) */
+    // Starting from version 1.6, the WRITPAGE command endianness is reversed: MSB is sent first, LSB second.
+    if (status_.version_major <= 1 && status_.version_minor <= 5) {
+        // Version 1.5 or lower
+        for (int i = 1; i < cmd_size - 1; i++) {
+            twi_cmd[i] = data_packet[i - 1];
+            checksum += (uint8_t)data_packet[i - 1]; /* Data checksum accumulator (mod 256) */
+        }        
+    } else {
+        // Version 1.6 and upper        
+        for (int i = 1; i < cmd_size - 1; i+=2) {
+            twi_cmd[i + 1] = data_packet[i - 1];        // -> Reverse WRITPAGE endianness {{{}}}
+            twi_cmd[i] = data_packet[i];                // -> Reverse WRITPAGE endianness {{{}}}
+            checksum += (uint8_t)data_packet[i - 1];    /* Data checksum accumulator (mod 256) */
+            checksum += (uint8_t)data_packet[i];        /* Data checksum accumulator (mod 256) */
+        }
     }
     twi_cmd[cmd_size - 1] = checksum;
     uint8_t twi_errors = TwiCmdXmit(twi_cmd, cmd_size, ACKWTPAG, twi_reply_arr, reply_size);
