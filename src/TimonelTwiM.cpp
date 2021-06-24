@@ -4,7 +4,7 @@
  *  ...........................................
  *  File: TimonelTwiM.cpp (Library)
  *  ........................................... 
- *  Version: 1.3.0 / 2021-06-13 "Alt"
+ *  Version: 1.3.0 / 2021-06-13 "Alt" Reverse WRITPAGE endianness
  *  gustavo.casanova@gmail.com
  *  ...........................................
  *  This library enables uploading firmware to a microcontroller
@@ -259,19 +259,14 @@ uint8_t Timonel::UploadApplication(uint8_t payload[], uint16_t payload_size, con
     // .....................................
     // ...... Application upload loop ......
     // .....................................
-    for (uint16_t i = 0; i < payload_size; i+=2) {
+    for (uint16_t i = 0; i < payload_size; i++) {
         if (i < (payload_size - padding)) {
             // If there are payload unsent data, place them in a data packet
-            //data_packet[packet_ix] = payload[i];
-            data_packet[packet_ix] = payload[i + 1];
-            data_packet[++packet_ix] = payload[i];
-
+            data_packet[packet_ix] = payload[i];
         } else {
             // If there is no more payload data and the last a data packet
             // is incomplete, add padding data at the end of it (0xFF)
-            //data_packet[packet_ix] = 0xFF;
             data_packet[packet_ix] = 0xFF;
-            data_packet[++packet_ix] = 0xFF;
         }
         if (packet_ix++ == (MST_PACKET_SIZE - 1)) {
             // If a data packet is complete, dispatch it one byte at a time
@@ -375,7 +370,7 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
     USE_SERIAL.print("Addr 0: ");
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     for (uint16_t address = 0; address < flash_size; address += rx_packet_size) {
-        twi_cmd_arr[1] = ((address & 0xFF00) >> 8); /* Flash page address high byte */        
+        twi_cmd_arr[1] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
         twi_cmd_arr[2] = (address & 0xFF);          /* Flash page address low byte */
         uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDFSH, twi_reply_arr, rx_packet_size + DMP_REPLY_OVRHD);
         if (twi_errors == 0) {
@@ -699,9 +694,11 @@ uint8_t Timonel::SendDataPacket(const uint8_t data_packet[]) {
     uint8_t twi_reply_arr[reply_size] = {0};
     uint8_t checksum = 0;
     twi_cmd[0] = WRITPAGE;
-    for (int i = 1; i < cmd_size - 1; i++) {
-        twi_cmd[i] = data_packet[i - 1];
-        checksum += (uint8_t)data_packet[i - 1]; /* Data checksum accumulator (mod 256) */
+    for (int i = 1; i < cmd_size - 1; i+=2) {
+        twi_cmd[i + 1] = data_packet[i - 1];        // -> Reverse WRITPAGE endianness {{{}}}
+        twi_cmd[i] = data_packet[i];                // -> Reverse WRITPAGE endianness {{{}}}
+        checksum += (uint8_t)data_packet[i - 1];    /* Data checksum accumulator (mod 256) */
+        checksum += (uint8_t)data_packet[i];        /* Data checksum accumulator (mod 256) */
     }
     twi_cmd[cmd_size - 1] = checksum;
     uint8_t twi_errors = TwiCmdXmit(twi_cmd, cmd_size, ACKWTPAG, twi_reply_arr, reply_size);
