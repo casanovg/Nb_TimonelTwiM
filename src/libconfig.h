@@ -1,11 +1,11 @@
 /*
   libconfig.h
-  ====================================
+  ============================================
   Timonel TWI Master configuration
-  ------------------------------------
- *  Version: 1.3.0 / 2021-06-13 "Alt"
+  --------------------------------------------
+  Version: 1.3.0 / 2021-06-27 "Little-endian"
   gustavo.casanova@gmail.com
-  ------------------------------------
+  --------------------------------------------
 */
 
 #ifndef TML_TWIMCONFIG_H
@@ -23,9 +23,14 @@
 #define DEBUG_LEVEL false  // NOTE: DEBUG not implemented for platforms other than ESP8266 and ESP32.
 #endif                     // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
 #endif                     // DEBUG_LEVEL
+
 #ifndef USE_SERIAL
 #define USE_SERIAL Serial  // Console output
 #endif                     // USE_SERIAL
+
+#ifndef ENDIANNESS
+#define ENDIANNESS 'LE'    // 'LE' = Little-endian, 'BE' = Big-endian (NOTE: For Timonel versions lower than 1.6, set it to Big-endian)
+#endif
 
 #ifndef FEATURES_CODE
 #define FEATURES_CODE 253  // Enabled features (NOTE: This must match the bootloader, If you aren't sure, use 253 (default)

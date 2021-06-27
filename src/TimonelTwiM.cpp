@@ -1,12 +1,12 @@
 /*
  *  Timonel TWI Master Library
  *  Author: Gustavo Casanova
- *  ...........................................
+ *  ............................................
  *  File: TimonelTwiM.cpp (Library)
- *  ........................................... 
- *  Version: 1.3.0 / 2021-06-13 "Alt" Reverse WRITPAGE endianness
+ *  ............................................
+ *  Version: 1.3.0 / 2021-06-27 "Little-endian"
  *  gustavo.casanova@gmail.com
- *  ...........................................
+ *  ............................................
  *  This library enables uploading firmware to a microcontroller
  *  running the Timonel bootloader. It inherits from the NbMicro
  *  class to implement the NB command set over the TWI (I2C) bus.
@@ -370,8 +370,13 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
     USE_SERIAL.print("Addr 0: ");
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     for (uint16_t address = 0; address < flash_size; address += rx_packet_size) {
+#if (ENDIANNESS == 'BE')        
         twi_cmd_arr[1] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
         twi_cmd_arr[2] = (address & 0xFF);          /* Flash page address low byte */
+#else
+        twi_cmd_arr[1] = (address & 0xFF);          /* Flash page address low byte */
+        twi_cmd_arr[2] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
+#endif /* ENDIANNESS */
         uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDFSH, twi_reply_arr, rx_packet_size + DMP_REPLY_OVRHD);
         if (twi_errors == 0) {
             uint8_t expected_checksum = 0;
@@ -526,8 +531,13 @@ bool Timonel::WriteEeprom(const uint16_t eeprom_addr, uint8_t data_byte) {
     const uint8_t reply_size = 2;
     uint8_t twi_cmd_arr[cmd_size] = {WRITEEPR, 0, 0, 0, 0};
     uint8_t twi_reply_arr[reply_size];
+#if (ENDIANNESS == 'BE')
     twi_cmd_arr[1] = ((eeprom_addr & 0xFF00) >> 8); /* Flash page address MSB */
     twi_cmd_arr[2] = (eeprom_addr & 0xFF);          /* Flash page address LSB */
+#else
+    twi_cmd_arr[1] = (eeprom_addr & 0xFF);          /* Flash page address LSB */
+    twi_cmd_arr[2] = ((eeprom_addr & 0xFF00) >> 8); /* Flash page address MSB */
+#endif /* ENDIANNESS */
     twi_cmd_arr[3] = data_byte;
     twi_cmd_arr[4] = (uint8_t)(twi_cmd_arr[1] + twi_cmd_arr[2] + twi_cmd_arr[3]); /* Checksum */
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL == 1))
@@ -572,8 +582,13 @@ uint8_t Timonel::ReadEeprom(const uint16_t eeprom_addr) {
     const uint8_t reply_size = 3;
     uint8_t twi_cmd_arr[cmd_size] = {READEEPR, 0, 0, 0};
     uint8_t twi_reply_arr[reply_size];
+#if (ENDIANNESS == 'BE')    
     twi_cmd_arr[1] = ((eeprom_addr & 0xFF00) >> 8); /* Flash page address MSB */
     twi_cmd_arr[2] = (eeprom_addr & 0xFF);          /* Flash page address LSB */
+#else
+    twi_cmd_arr[1] = (eeprom_addr & 0xFF);          /* Flash page address LSB */
+    twi_cmd_arr[2] = ((eeprom_addr & 0xFF00) >> 8); /* Flash page address MSB */
+#endif /* ENDIANNESS */
     twi_cmd_arr[3] = (uint8_t)(twi_cmd_arr[1] + twi_cmd_arr[2]); /* Checksum */
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL == 1))
     USE_SERIAL.printf_P(" (a:%02X%02X) ", twi_cmd_arr[1], twi_cmd_arr[2]);
@@ -694,21 +709,9 @@ uint8_t Timonel::SendDataPacket(const uint8_t data_packet[]) {
     uint8_t twi_reply_arr[reply_size] = {0};
     uint8_t checksum = 0;
     twi_cmd[0] = WRITPAGE;
-    // Starting from version 1.6, the WRITPAGE command endianness is reversed: MSB is sent first, LSB second.
-    if (status_.version_major <= 1 && status_.version_minor <= 5) {
-        // Version 1.5 or lower
-        for (int i = 1; i < cmd_size - 1; i++) {
-            twi_cmd[i] = data_packet[i - 1];
-            checksum += (uint8_t)data_packet[i - 1]; /* Data checksum accumulator (mod 256) */
-        }        
-    } else {
-        // Version 1.6 and upper        
-        for (int i = 1; i < cmd_size - 1; i+=2) {
-            twi_cmd[i + 1] = data_packet[i - 1];        // -> Reverse WRITPAGE endianness {{{}}}
-            twi_cmd[i] = data_packet[i];                // -> Reverse WRITPAGE endianness {{{}}}
-            checksum += (uint8_t)data_packet[i - 1];    /* Data checksum accumulator (mod 256) */
-            checksum += (uint8_t)data_packet[i];        /* Data checksum accumulator (mod 256) */
-        }
+    for (int i = 1; i < cmd_size - 1; i++) {
+        twi_cmd[i] = data_packet[i - 1];
+        checksum += (uint8_t)data_packet[i - 1]; /* Data checksum accumulator (mod 256) */
     }
     twi_cmd[cmd_size - 1] = checksum;
     uint8_t twi_errors = TwiCmdXmit(twi_cmd, cmd_size, ACKWTPAG, twi_reply_arr, reply_size);
@@ -746,8 +749,13 @@ uint8_t Timonel::SetPageAddress(const uint16_t page_addr) {
     const uint8_t reply_size = 2;
     uint8_t twi_cmd_arr[cmd_size] = {STPGADDR, 0, 0, 0};
     uint8_t twi_reply_arr[reply_size];
+#if (ENDIANNESS == 'BE')    
     twi_cmd_arr[1] = ((page_addr & 0xFF00) >> 8);                /* Flash page address MSB */
     twi_cmd_arr[2] = (page_addr & 0xFF);                         /* Flash page address LSB */
+#else
+    twi_cmd_arr[1] = (page_addr & 0xFF);                         /* Flash page address LSB */
+    twi_cmd_arr[2] = ((page_addr & 0xFF00) >> 8);                /* Flash page address MSB */
+#endif  /* ENDIANNESS */
     twi_cmd_arr[3] = (uint8_t)(twi_cmd_arr[1] + twi_cmd_arr[2]); /* Checksum */
 #if ((defined DEBUG_LEVEL) && (DEBUG_LEVEL == 1))
     USE_SERIAL.printf_P(" (a:%02X%02X) ", twi_cmd_arr[1], twi_cmd_arr[2]);
