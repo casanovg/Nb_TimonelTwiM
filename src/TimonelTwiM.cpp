@@ -370,7 +370,7 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
     USE_SERIAL.print("Addr 0: ");
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     for (uint16_t address = 0; address < flash_size; address += rx_packet_size) {
-#if (ENDIANNESS == 'BE')        
+#if (ENDIANNESS == 'B')        
         twi_cmd_arr[1] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
         twi_cmd_arr[2] = (address & 0xFF);          /* Flash page address low byte */
 #else
@@ -531,7 +531,7 @@ bool Timonel::WriteEeprom(const uint16_t eeprom_addr, uint8_t data_byte) {
     const uint8_t reply_size = 2;
     uint8_t twi_cmd_arr[cmd_size] = {WRITEEPR, 0, 0, 0, 0};
     uint8_t twi_reply_arr[reply_size];
-#if (ENDIANNESS == 'BE')
+#if (ENDIANNESS == 'B')
     twi_cmd_arr[1] = ((eeprom_addr & 0xFF00) >> 8); /* Flash page address MSB */
     twi_cmd_arr[2] = (eeprom_addr & 0xFF);          /* Flash page address LSB */
 #else
@@ -582,7 +582,7 @@ uint8_t Timonel::ReadEeprom(const uint16_t eeprom_addr) {
     const uint8_t reply_size = 3;
     uint8_t twi_cmd_arr[cmd_size] = {READEEPR, 0, 0, 0};
     uint8_t twi_reply_arr[reply_size];
-#if (ENDIANNESS == 'BE')    
+#if (ENDIANNESS == 'B')    
     twi_cmd_arr[1] = ((eeprom_addr & 0xFF00) >> 8); /* Flash page address MSB */
     twi_cmd_arr[2] = (eeprom_addr & 0xFF);          /* Flash page address LSB */
 #else
@@ -749,7 +749,7 @@ uint8_t Timonel::SetPageAddress(const uint16_t page_addr) {
     const uint8_t reply_size = 2;
     uint8_t twi_cmd_arr[cmd_size] = {STPGADDR, 0, 0, 0};
     uint8_t twi_reply_arr[reply_size];
-#if (ENDIANNESS == 'BE')    
+#if (ENDIANNESS == 'B')
     twi_cmd_arr[1] = ((page_addr & 0xFF00) >> 8);                /* Flash page address MSB */
     twi_cmd_arr[2] = (page_addr & 0xFF);                         /* Flash page address LSB */
 #else
