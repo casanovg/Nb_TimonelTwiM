@@ -454,9 +454,9 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
         delay(DLY_PKT_REQUEST);
     }
 #if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
-    USE_SERIAL.printf_P("\n\r[%s] Timonel (TWI %d) flash memory dump successful!", __func__, addr_);
+    USE_SERIAL.printf_P("\n\n\r[%s] Timonel (TWI %d) flash memory dump successful!", __func__, addr_);
 #else   // -----
-    USE_SERIAL.println("");
+    USE_SERIAL.println("\n");
     USE_SERIAL.print(__func__);
     USE_SERIAL.print(" Timonel (TWI ");
     USE_SERIAL.print(addr_);
