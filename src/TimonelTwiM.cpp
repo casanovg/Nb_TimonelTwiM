@@ -357,17 +357,17 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
     uint8_t twi_cmd_arr[cmd_size] = {READFLSH, 0, 0, 0};
     uint8_t twi_reply_arr[rx_packet_size + DMP_REPLY_OVRHD];
     uint8_t checksum_errors = 0;
-    uint8_t line_ix = 1;
+    uint16_t line_ix = values_per_line;
+    uint16_t last_addr_shown = 0;
     twi_cmd_arr[3] = rx_packet_size; /* Requested packet size */
 #if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
-    USE_SERIAL.printf_P("\n\r[%s] Dumping Timonel (TWI %d) flash memory ...\n\n\r", __func__, addr_);
-    USE_SERIAL.printf_P("Addr %04X: ", 0);
+    USE_SERIAL.printf_P("\n\r[%s] Dumping Timonel (TWI %d) flash memory ...\n\r", __func__, addr_);
 #else   // -----
     USE_SERIAL.println("");
     USE_SERIAL.print(__func__);
-    USE_SERIAL.print(" Function not supported by current Timonel features: TWI ");
+    USE_SERIAL.print(" Dumping Timonel flash memory ... TWI ");
     USE_SERIAL.println(addr_);
-    USE_SERIAL.print("Addr 0: ");
+	USE_SERIAL.println("");
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
     for (uint16_t address = 0; address < flash_size; address += rx_packet_size) {
 #if (ENDIANNESS == 'B')        
@@ -376,39 +376,36 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
 #else
         twi_cmd_arr[1] = (address & 0xFF);          /* Flash page address low byte */
         twi_cmd_arr[2] = ((address & 0xFF00) >> 8); /* Flash page address high byte */
-#endif /* ENDIANNESS */
+#endif // ENDIANNESS
         uint8_t twi_errors = TwiCmdXmit(twi_cmd_arr, cmd_size, ACKRDFSH, twi_reply_arr, rx_packet_size + DMP_REPLY_OVRHD);
         if (twi_errors == 0) {
             uint8_t expected_checksum = 0;
             for (uint8_t i = 1; i < (rx_packet_size + 1); i++) {
-#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
-                USE_SERIAL.printf_P("%02X", twi_reply_arr[i]); /* Memory values */
-#else                                                          // -----
-                USE_SERIAL.print(twi_reply_arr[i], HEX); /* Memory values */
-#endif                                                         // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                 if (line_ix == values_per_line) {
 #if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                     USE_SERIAL.printf_P("\n\r");
+					USE_SERIAL.printf_P("Addr %04X: ", last_addr_shown);
+					
 #else   // -----
                     USE_SERIAL.println("");
+					USE_SERIAL.print("Addr %04X: ");
+					USE_SERIAL.print(last_addr_shown)
+					USE_SERIAL.print(" ");
 #endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
-                    if ((address + rx_packet_size) < flash_size) {
-#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
-                        USE_SERIAL.printf_P("Addr %04X: ", address + rx_packet_size); /* Page address */
-#else                                                                                 // -----
-                        USE_SERIAL.print("Addr ");
-                        USE_SERIAL.print(address + rx_packet_size, HEX); /* Page address */
-                        USE_SERIAL.print(": ");
-#endif                                                                                // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
-                    }
+					last_addr_shown += values_per_line;
                     line_ix = 0;
                 } else {
 #if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
                     USE_SERIAL.printf_P(" "); /* Space between values */
-#else                                         // -----
+#else   // -----
                     USE_SERIAL.print(" "); /* Space between values */
-#endif                                        // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
+#endif  // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM
                 }
+#if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
+                USE_SERIAL.printf_P("%02X", twi_reply_arr[i]); /* Memory values */
+#else                                                          // -----
+                USE_SERIAL.print(twi_reply_arr[i], HEX); /* Memory values */
+#endif                                                         // ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM				
                 line_ix++;
                 expected_checksum += (uint8_t)twi_reply_arr[i];
             }
