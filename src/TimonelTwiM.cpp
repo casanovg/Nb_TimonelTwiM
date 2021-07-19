@@ -357,7 +357,7 @@ uint8_t Timonel::DumpMemory(const uint16_t flash_size, const uint8_t rx_packet_s
     uint8_t twi_cmd_arr[cmd_size] = {READFLSH, 0, 0, 0};
     uint8_t twi_reply_arr[rx_packet_size + DMP_REPLY_OVRHD];
     uint8_t checksum_errors = 0;
-    uint16_t line_ix = values_per_line;
+    uint8_t line_ix = values_per_line;
     uint16_t last_addr_shown = 0;
     twi_cmd_arr[3] = rx_packet_size; /* Requested packet size */
 #if (ARDUINO_ARCH_ESP8266 || ARDUINO_ESP32_DEV || ESP_PLATFORM)
